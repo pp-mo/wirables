@@ -46,7 +46,7 @@ from typing import Any, Callable
 
 # : allowed signal value content
 type SignalValueType = str | int | float
-SignalValueTypes = (str, int, float)
+ALLOWED_SIGNAL_VALUE_TYPES = (str, int, float)
 
 # : time specifiers
 type TimeType = float
@@ -85,6 +85,18 @@ SIG_ZERO: SignalValueType = 0
 SIG_START_DEFAULT: SignalValueType = SIG_ZERO
 
 
+def default_trace_action(
+    time: TimeType, sig: "Signal", kwargs: dict[str, Any] | None = None
+):
+    """The default trace operation (which is to print)."""
+    msg = f"@{time}: Sig<{sig.name}> : {sig.previous_value} ==> {sig.value}"
+    print(msg)
+
+
+# : A single common definition for what the trace actions do.
+TRACE_HANDLER_CLIENT: SignalClient = default_trace_action
+
+
 class Signal:
     def __init__(self, name: str, start_value: SignalValueType | None = None):
         self.name = name
@@ -102,7 +114,7 @@ class Signal:
         return msg
 
     def update(self, time: TimeType, value: SignalValueType = SIG_ZERO):
-        assert isinstance(value, SignalValueTypes)
+        assert isinstance(value, ALLOWED_SIGNAL_VALUE_TYPES)
         self.previous_value = self.value
         self.value = value
         for connection in self.connected_clients:
@@ -119,14 +131,37 @@ class Signal:
 
         The 'call' callback (aka 'client') is invoked whenever the signal updates.
         """
-        connection = Connection(call, kwargs or {})
+        if kwargs is None:
+            kwargs = {}
+        connection = Connection(call, kwargs)
         if connection not in self.connected_clients:
             self.connected_clients[index:index] = [connection]
         return connection  # this enables us to remove it
 
     def disconnect(self, connection: Connection):
+        """Remove a given output connection."""
         while connection in self.connected_clients:
             self.connected_clients.remove(connection)
+
+    # Tracing
+    #   this is best defined within the Signal class, since it relies on the private
+    #   instance variable "self._trace_connection".
+    #
+
+    @staticmethod
+    def _call_trace(
+        time: TimeType, sig: "Signal", kwargs: dict[str, Any] | None = None
+    ):
+        """The client callback for trace connections.
+
+        All traces call this, which then calls TRACE_HANDLER_CLIENT.
+        This enables you to modify **all** trace operations by setting
+        TRACE_HANDLER_CLIENT.
+
+        This is defined as a static function, since it must conform to the SignalClient
+        definition.
+        """
+        TRACE_HANDLER_CLIENT(time, sig, kwargs)
 
     def trace(self):
         """Start tracing this signal.
@@ -135,43 +170,20 @@ class Signal:
         The operation performed can be configured via desim.signal.DEFAULT_TRACE_OP.
         The connection created is stored as self._trace.
         """
-        trace_signal(self)
+        trace = getattr(self, "_trace_connection", None)
+        if trace is None:
+            # (of course doesn't function if something else inserts there)
+            self._trace_connection = self.connect(
+                self._call_trace,
+                # N.B. insert trace at **start** of connections, so it happens before
+                # other clients are invoked.
+                # Of course this can be broken by further insertions.
+                index=0,
+            )
 
     def untrace(self):
         """Stop tracing this signal."""
-        untrace_signal(self)
-
-
-def signal_default_trace_action(
-    time: TimeType, sig: Signal, kwargs: dict[str, Any] | None = None
-):
-    msg = f"@{time}: Sig<{sig.name}> : {sig.previous_value} ==> {sig.value}"
-    print(msg)
-
-
-sig = Signal(name="signal")
-sig.connect(signal_default_trace_action)
-
-DEFAULT_TRACE_OP: SignalClient = signal_default_trace_action
-
-
-def _call_trace(time: TimeType, sig: Signal, kwargs: dict[str, Any] | None = None):
-    """The client callback for trace connections.
-
-    All traces call this, so setting DEFAULT_TRACE_OP configures all trace actions.
-    """
-    DEFAULT_TRACE_OP(time, sig, None)
-
-
-def trace_signal(signal: Signal, on: bool = True):
-    trace = getattr(signal, "_trace_connection", None)
-    if trace is None:
-        # N.B. insert trace at start, so it happens before other clients are called.
-        # (of course doesn't function if something else inserts there)
-        signal._trace_connection = signal.connect(_call_trace, 0)
-
-
-def untrace_signal(signal):
-    trace = getattr(signal, "_trace_connection", None)
-    if trace is not None:
-        signal.disconnect(trace)
+        trace = getattr(self, "_trace_connection", None)
+        if trace is not None:
+            self.disconnect(trace)
+        self._trace_connection = None
