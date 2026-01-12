@@ -18,14 +18,15 @@ class TestCreate:
         assert sig._trace_connection is None
 
     @pytest.mark.parametrize("val", ["one", 17, 3.21, "no-assign"])
-    def test_repr(self, sig, val):
+    def test_str(self, val):
         if val != "no-assign":
-            sig.update(0, val)
+            sig = Signal("s2", val)
         else:
-            val = 0  # original expected
-        expect = f"Signal<s1 = {val!r}>"
+            sig = Signal("s2")
+            val = 0
+        expect = f"Signal<s2 = {val!r}>"
         print(f"Expected: {expect}")
-        assert repr(sig) == expect
+        assert str(sig) == expect
 
 
 class TestUpdate:
@@ -46,8 +47,8 @@ class TestConnect:
     def call_and_callrecords(self, sig):
         call_records = []
 
-        def call(time, signal, kwargs):
-            call_records.append((time, signal.value, signal.previous_value, kwargs))
+        def call(time, value, context):
+            call_records.append((time, value, context))
 
         return call, call_records
 
@@ -59,15 +60,15 @@ class TestConnect:
         sig.update(time1, value1)
         time2, value2 = 2.1, "stuff"
         sig.update(time2, value2)
-        assert call_records == [(time1, value1, 0, {}), (time2, value2, value1, {})]
+        assert call_records == [(time1, value1, None), (time2, value2, None)]
 
-    def test_connect_kwargs(self, sig, call_and_callrecords):
+    def test_connect_callcontext(self, sig, call_and_callrecords):
         call, call_records = call_and_callrecords
         call_kwargs = {"a": 1}
-        sig.connect(call, kwargs=call_kwargs)
+        sig.connect(call, call_context=call_kwargs)
         time, value = 0.123, 123
         sig.update(time, value)
-        assert call_records == [(time, value, 0, call_kwargs)]
+        assert call_records == [(time, value, call_kwargs)]
 
 
 class TestTrace:
@@ -75,8 +76,10 @@ class TestTrace:
     def trace_records(self):
         trace_records = []
 
-        def my_trace(time, sig, kwargs):
-            trace_records.append((time, sig, sig.value, sig.previous_value))
+        def my_trace(time, value, sig):
+            record = (time, sig, sig.value, sig.previous_value)
+            print("Logged trace record :", record)
+            trace_records.append(record)
 
         old_client = signal.TRACE_HANDLER_CLIENT
         signal.TRACE_HANDLER_CLIENT = my_trace

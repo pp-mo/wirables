@@ -2,156 +2,139 @@
 Signal support.
 
 A Signal is an object with a current state "value", which notifies a list of
-  connections whenever a new value is "sent" (aka "an update").
+  connections whenever a new value is "sent" via Signal.update(time, value).
   [[ A Signal can also be "traced", which adds a monitoring action to its connections. ]]
-Signal(name, state, previous_state, connected_clients)
-    .update(time, value)
-    .connect(client)
-    .disconnection(client)
-The 'client's are callables with the generic signature (time, state)
-NOTE: the ".set()" call has NO provision for passing additional per-call context.
-This is intentional, as the action of a Signal update should not depend on the "source"
-of the change.
 
-Signal outputs can model EITHER a value which changes on update, or may be completely
-event-triggered, i.e. the value of an update can be irrelevant (e.g. always sends the
-same value, but the event itself can cause change elsewhere).
-We also don't control the type of values in any way (though assume immutable??).
+A signal event and/or value change is made by calling Signal.update(time, value=None),
+where time and value are interpreted as EventTime and EventValue.
 
-We also have
-    Signal.hook(hook_client, **kwargs)
-    Signal.unhook(hook_client)
-In this case, a hook_client has the generic signature (time, signal, **kwargs)
-    - when called, the signal provides "signal.state" and "signal.previous_state"
-    - this is "less agnostic" about the signal itself (as opposed to the update)
-        -> allows to define a tracing operation (showing previous+new)
+A signal's value is its only state, and it implements no logic or scheduling functions:
+It is purely a message-passing mechanism.
 
-#
-# trace/untrace_signal add/remove a specific 'client' which emits/logs an update message
-# whenever a signal is updated.
-#
-def _trace_signal(time, signal):
-    # need to do better than this...
-    print(time, signal)
+A signal's values and updates can represent EITHER a continuous value which only changes
+at updates, OR a pure event-trigger, for which the value is irrelevant.
 
-def trace_signal(signal)
-    signal._hook(_trace_signal)
+NOTE: the ".update()" call itself has NO provision for passing additional per-call
+context.  This is intentional, as the output of a Signal should not depend on the
+"source" of a change.
+Being an EventClient, the Signal.update call() is capable of generating additional
+scheduled actions, by returning a list of new Events to the caller.
 
-def untrace_signal(signal)
-    signal._unhook(_trace_signal)
+Connections are added with Signal.connect(client, call_context=None, index=-1).
+When connection clients are called in a Signal.update(), the new time and value are
+passed.  The signal itself can be used as, or included in, the connection context.
+
+We also provide Signal.trace/untrace().
+Tracing connects a standard EventClient, which emits or logs a standard signal update
+message whenever the signal is updated.
+The operation of this is configurable by changing the value of TRACE_HANDLER_CLIENT :
+its default is the 'default_trace_action' function, which prints to the terminal.
 """
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
-# : allowed signal value content
-type SignalValueType = str | int | float
-ALLOWED_SIGNAL_VALUE_TYPES = (str, int, float)
-
-# : time specifiers
-type TimeType = float
-
-# class SignalClient(Protocol):
-#     """The type of a signal client.
-#
-#     A signal client is just a callback with a specific signature.
-#     """
-#     def __call__(self, time: TimeType, signal:"Signal", **kwargs: dict[str, Any] | None):
-#         pass
-
-# : signal client callback type : note, final 'dict' is a kwargs-style context argument.
-type SignalClient = Callable[[TimeType, Signal, dict[str, Any] | None], None]
+from desim.event import EventTime, EventValue, EventClient, Event
 
 
 @dataclass
-class Connection:
+class SignalConnection:
     """
     A Connection is a client associated with a specific per-connection context.
 
-    The kwargs are those given when the client was connected with Signal.connect.
-    This isn't strictly necessary, but without it a callback function could only be used
-    once : the provision of a context makes especially automated uses neater.
+    The call_context is that given when the client was connected with Signal.connect.
+    This isn't *strictly* necessary, but without it a given callback function could only
+    be connected once : the provision of a context value makes especially automated uses
+    neater.
     It is also useful to have a distinct object for each connection : at the least,
     it means that we can implement Signal.disconnect.
     """
 
-    call: SignalClient
-    context_kwargs: dict[str, Any]
+    call: EventClient
+    call_context: Any
 
 
 # Pre-defined constant values
-SIG_UNDEFINED: SignalValueType = "<undefined-value>"
-SIG_ZERO: SignalValueType = 0
-SIG_START_DEFAULT: SignalValueType = SIG_ZERO
+SIG_UNDEFINED: EventValue = EventValue("<undefined-value>")
+SIG_ZERO: EventValue = EventValue(0)
+SIG_START_DEFAULT: EventValue = SIG_ZERO
 
 
-def default_trace_action(
-    time: TimeType, sig: "Signal", kwargs: dict[str, Any] | None = None
-):
-    """The default trace operation (which is to print)."""
+def default_trace_action(time: EventTime, value: EventValue, sig: "Signal"):
+    """The default trace operation = print signal update details to the terminal.
+
+    N.B. although this conforms to the generic EventClient signature, in this case the
+    passed 'context' argument is **always the signal which this is a trace of**.
+    """
     msg = f"@{time}: Sig<{sig.name}> : {sig.previous_value} ==> {sig.value}"
     print(msg)
 
 
-# : A single common definition for what the trace actions do.
-TRACE_HANDLER_CLIENT: SignalClient = default_trace_action
+# : A single common definition for what trace actions do.
+TRACE_HANDLER_CLIENT: EventClient = default_trace_action
 
 
 class Signal:
-    def __init__(self, name: str, start_value: SignalValueType | None = None):
+    def __init__(
+        self, name: str, start_value: EventValue | int | float | str | None = None
+    ):
         self.name = name
         if start_value is None:
             # Note: pragmatically, the default start state is 0 rather than 'undefined'
             start_value = SIG_START_DEFAULT
-        self.value = start_value
-        self.previous_value = SIG_UNDEFINED
-        self.connected_clients: list[Connection] = []
+        self.value: EventValue = EventValue(start_value)
+        self.previous_value: EventValue = SIG_UNDEFINED
+        self.connected_clients: list[SignalConnection] = []
         # This is a placeholder for the (unique) trace connection
-        self._trace_connection: Connection | None = None
+        self._trace_connection: SignalConnection | None = None
 
-    def __repr__(self):
-        msg = f"Signal<{self.name} = {self.value!r}>"
+    def __str__(self):
+        msg = f"Signal<{self.name} = {self.value!s}>"
         return msg
 
-    def update(self, time: TimeType, value: SignalValueType = SIG_ZERO):
-        assert isinstance(value, ALLOWED_SIGNAL_VALUE_TYPES)
+    def update(self, time: EventTime, value: EventValue = SIG_ZERO) -> list[Event]:
         self.previous_value = self.value
+        value = EventValue(value)
         self.value = value
+        further_events: list[Event] = []
         for connection in self.connected_clients:
             # TODO: should really send only the state, not itself ??
             # current form for access to .state and .previous (?.name? : not really)
             # NEEDED for trace, in current form.  But device tracing is nicer ...
             # NOTE: the context is passed as a kwargs **argument**.
-            connection.call(time, self, connection.context_kwargs)
+            new_events = connection.call(time, value, connection.call_context)
+            if new_events:
+                # N.B. also allows callbacks to return nothing.
+                further_events.extend(new_events)
+        return further_events
 
     def connect(
-        self, call: SignalClient, index: int = -1, kwargs: dict[str, Any] | None = None
-    ) -> Connection:
+        self, call: EventClient, call_context=None, index: int = -1
+    ) -> SignalConnection:
         """Create a connection to this signal.
 
         The 'call' callback (aka 'client') is invoked whenever the signal updates.
+        The index governs where the connection is installed in the (current) connections
+        list, for ordering control: -1[default] --> last; 0 --> first.
         """
-        if kwargs is None:
-            kwargs = {}
-        connection = Connection(call, kwargs)
+        connection = SignalConnection(call, call_context)
         if connection not in self.connected_clients:
             self.connected_clients[index:index] = [connection]
         return connection  # this enables us to remove it
 
-    def disconnect(self, connection: Connection):
+    def disconnect(self, connection: SignalConnection):
         """Remove a given output connection."""
         while connection in self.connected_clients:
             self.connected_clients.remove(connection)
 
     # Tracing
-    #   this is best defined within the Signal class, since it relies on the private
-    #   instance variable "self._trace_connection".
+    #   This is defined within the Signal class, although it operates via the public
+    #   'connection' mechanism, since it uses on a private instance variable
+    #   "self._trace_connection", which is created in init.
     #
 
     @staticmethod
-    def _call_trace(
-        time: TimeType, sig: "Signal", kwargs: dict[str, Any] | None = None
-    ):
+    def _call_trace(time: EventTime, value: EventValue, sig: "Signal"):
         """The client callback for trace connections.
 
         All traces call this, which then calls TRACE_HANDLER_CLIENT.
@@ -161,22 +144,21 @@ class Signal:
         This is defined as a static function, since it must conform to the SignalClient
         definition.
         """
-        TRACE_HANDLER_CLIENT(time, sig, kwargs)
+        TRACE_HANDLER_CLIENT(time, sig.value, sig)  # N.B. the signal is the context
 
     def trace(self):
         """Start tracing this signal.
 
         Adds a standard logging client to show whenever the signal updates.
         The operation performed can be configured via desim.signal.DEFAULT_TRACE_OP.
-        The connection created is stored as self._trace.
         """
         trace = getattr(self, "_trace_connection", None)
         if trace is None:
-            # (of course doesn't function if something else inserts there)
             self._trace_connection = self.connect(
                 self._call_trace,
-                # N.B. insert trace at **start** of connections, so it happens before
-                # other clients are invoked.
+                call_context=self,
+                # N.B. always insert trace at **start** of connections, so it happens
+                # before other clients (whereas *default* behaviour = insert at end).
                 # Of course this can be broken by further insertions.
                 index=0,
             )
