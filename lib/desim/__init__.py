@@ -15,6 +15,10 @@ A Signal.update()
 
 A Device.<input>() will likewise return List[Event]
 
+??queries??
+    - an input call input(time, value) definitely does *not* have context.
+    - likewise, an action(time) doesn't need value OR context.
+
 
 Basic classes:
 

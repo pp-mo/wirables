@@ -31,6 +31,7 @@ The operation of this is configurable by changing the value of TRACE_HANDLER_CLI
 its default is the 'default_trace_action' function, which prints to the terminal.
 """
 
+from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
@@ -60,12 +61,19 @@ SIG_ZERO: EventValue = EventValue(0)
 SIG_START_DEFAULT: EventValue = SIG_ZERO
 
 
-def default_trace_action(time: EventTime, value: EventValue, sig: "Signal"):
+def default_trace_action(
+    time: EventTime, value: EventValue | None = None, signal: Signal | None = None
+):
     """The default trace operation = print signal update details to the terminal.
 
     N.B. although this conforms to the generic EventClient signature, in this case the
     passed 'context' argument is **always the signal which this is a trace of**.
     """
+    match signal:
+        case None:
+            sig = Signal("<?missing?>")
+        case _:
+            sig = signal
     msg = f"@{time}: Sig<{sig.name}> : {sig.previous_value} ==> {sig.value}"
     print(msg)
 
@@ -142,9 +150,6 @@ class Signal:
         All traces call this, which then calls TRACE_HANDLER_CLIENT.
         This enables you to modify **all** trace operations by setting
         TRACE_HANDLER_CLIENT.
-
-        This is defined as a static function, since it must conform to the SignalClient
-        definition.
         """
         TRACE_HANDLER_CLIENT(time, sig.value, sig)  # N.B. the signal is the context
 

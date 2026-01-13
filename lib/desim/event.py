@@ -93,7 +93,7 @@ class EventValue:
         return self.value == other.value
 
 
-EventClient = Callable[[EventTime, EventValue, Any], list["Event"] | None]
+EventClient = Callable[[EventTime, EventValue | None, Any], list["Event"] | None]
 
 
 class Event:
@@ -101,4 +101,16 @@ class Event:
     value: EventValue
     call: EventClient
     context: Any = None
+
     # TODO: a suitable constructor will be wanted.
+    def __init__(
+        self, time: EventTime, value: EventValue, call: EventClient, context: Any = None
+    ):
+        self.time = EventTime(time)
+        self.value = EventValue(value)
+        self.call = call
+        self.context = context
+
+    def action(self):
+        results = self.call(self.time, self.value, self.context)
+        return results
