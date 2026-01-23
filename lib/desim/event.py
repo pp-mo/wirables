@@ -11,11 +11,13 @@ EventTime with an associated EventValue.
 """
 
 from __future__ import annotations
+from functools import total_ordering
 from typing import Any, Callable
 
 type TimeTypes = EventTime | int | float
 
 
+@total_ordering
 class EventTime:
     """Class to define event times.
 
