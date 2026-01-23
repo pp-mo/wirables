@@ -35,7 +35,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from desim.event import EventTime, EventValue, EventClient, Event
+from desim.event import EventTime, EventValue, EventClient, Event, TimeTypes, ValueTypes
 
 
 @dataclass
@@ -86,7 +86,7 @@ class Signal:
     def __init__(
         self,
         name: str,
-        start_value: EventValue | int | float | str = SIG_START_DEFAULT,
+        start_value: ValueTypes = SIG_START_DEFAULT,
     ):
         self.name = name
         self.value: EventValue = EventValue(start_value)
@@ -101,8 +101,8 @@ class Signal:
 
     def update(
         self,
-        time: EventTime | int | float,
-        value: EventValue | int | float | str = SIG_ZERO,
+        time: TimeTypes,
+        value: ValueTypes = SIG_ZERO,
         context=None,  # N.B. unused, only there so we can receive from events
     ) -> list[Event]:
         time = EventTime(time)

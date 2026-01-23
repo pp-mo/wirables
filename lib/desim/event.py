@@ -13,6 +13,8 @@ EventTime with an associated EventValue.
 from __future__ import annotations
 from typing import Any, Callable
 
+type TimeTypes = EventTime | int | float
+
 
 class EventTime:
     """Class to define event times.
@@ -27,7 +29,7 @@ class EventTime:
     time: float = 0.0
     priority: int = 0
 
-    def __init__(self, time: EventTime | int | float, priority: int = 0):
+    def __init__(self, time: TimeTypes, priority: int = 0):
         match time:
             case EventTime():
                 self.time, self.priority = time.time, time.priority
@@ -65,6 +67,9 @@ class EventTime:
     # TODO: implement addition with ordinary numbers  (not yet used/tested)
 
 
+type ValueTypes = EventValue | int | float | str
+
+
 class EventValue:
     """Class to ensure uniform representation of event values.
 
@@ -75,7 +80,7 @@ class EventValue:
 
     value: int | float | str = 0
 
-    def __init__(self, value: EventValue | int | float | str):
+    def __init__(self, value: ValueTypes):
         match value:
             case EventValue():
                 self.value = value.value
@@ -85,10 +90,10 @@ class EventValue:
                 raise TypeError(f"Argument 'value', {value!r} has unsupported type.")
 
     def __repr__(self):
-        return f"EventValue({self.value})"
+        return f"EventValue({self.value!r})"
 
     def __str__(self):
-        return str(self.value)
+        return repr(self.value)
 
     def __eq__(self, other):
         if not isinstance(other, EventValue):
@@ -107,16 +112,17 @@ class Event:
 
     def __init__(
         self,
-        time: EventTime,
+        time: TimeTypes,
         call: EventClient,
-        value: EventValue | None = None,
+        value: ValueTypes | None = None,
         context: Any = None,
     ):
         self.time = EventTime(time)
         self.callback = call
-        if value is not None:
-            value = EventValue(value)
-        self.value = value
+        if value is None:
+            self.value = None
+        else:
+            self.value = EventValue(value)
         self.context = context
 
     def __repr__(self):

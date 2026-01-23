@@ -3,7 +3,7 @@ from functools import wraps
 from typing import Any, Callable
 
 from desim import SIG_UNDEFINED
-from desim.event import Event, EventClient, EventTime, EventValue
+from desim.event import Event, EventClient, EventTime, EventValue, TimeTypes, ValueTypes
 from desim.signal import SIG_START_DEFAULT, Signal, SignalConnection
 
 InputAndActionClassCallsType = Callable[
@@ -66,8 +66,8 @@ class Device:
         @wraps(inner_func)
         def wrapper_call(
             self,
-            time: EventTime,
-            value: EventValue | int | float | str | None = None,
+            time: TimeTypes,
+            value: ValueTypes | None = None,
             context=None,
         ):
             time = EventTime(time)
@@ -150,7 +150,7 @@ class Device:
         """Return a dict of the device's inputs."""
         return self._map_labelled_funcs("_label_input")
 
-    def add_output(self, name: str, start_value: EventValue = SIG_START_DEFAULT):
+    def add_output(self, name: str, start_value: ValueTypes = SIG_START_DEFAULT):
         """Create an output signal.
 
         Outputs are normally created in init.  They are automatically assigned to the
@@ -173,9 +173,9 @@ class Device:
 
     def act(
         self,
-        time: EventTime | float | int,
+        time: TimeTypes,
         action_name: str,
-        value: EventValue | float | int | str | None = None,
+        value: ValueTypes | None = None,
         context=None,
     ):
         """
@@ -216,7 +216,7 @@ class Device:
     def update(
         self,
         output_name: str,
-        value: EventValue | float | int | str | None = None,
+        value: ValueTypes | None = None,
     ):
         """
         Update an output.
@@ -246,7 +246,7 @@ class Device:
     #  but implemented via hooks.
     #  The storage + handling will still need an instance variable, though.
     def hook(
-        self, name: str, call: EventClient, context=None, call_after=False
+        self, name: str, call: EventClient, context=None, call_after: bool = False
     ) -> SignalConnection:
         """Hook an output, input or action of the device.
 
@@ -342,6 +342,8 @@ class Device:
                 val = SIG_UNDEFINED
             case EventValue():
                 val = value
+            case _:
+                raise ValueError(f"unexpected type {type(value)} of 'value': {value!r}")
 
         trace_context = context["hook_context"]
         call_context = context["call_context"]
