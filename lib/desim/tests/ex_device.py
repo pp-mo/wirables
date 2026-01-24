@@ -12,7 +12,7 @@ class TrialDevice(Device):
     @Device.input
     def in1(self, time, value):
         if self.state == "idle":
-            self.update("out1", SIG_UNDEFINED)
+            self.out("out1", SIG_UNDEFINED)
         self.state = "changing"
         self._time_change_complete = time.time + self.delay
         self._latest_value = value
@@ -22,7 +22,7 @@ class TrialDevice(Device):
     def new_output(self, time):
         assert self.state == "changing"
         if time.time >= self._time_change_complete:
-            self.update("out1", self._latest_value)
+            self.out("out1", self._latest_value)
             self.state = "idle"
 
 

@@ -102,7 +102,7 @@ class Signal:
     def update(
         self,
         time: TimeTypes,
-        value: ValueTypes = SIG_ZERO,
+        value: ValueTypes = SIG_UNDEFINED,
         context=None,  # N.B. unused, only there so we can receive from events
     ) -> list[Event]:
         time = EventTime(time)

@@ -39,7 +39,7 @@ class TestUpdate:
         sig.update(0, 77)
         assert sig.value == 77
         sig.update(0)
-        assert sig.value == signal.SIG_ZERO
+        assert sig.value == signal.SIG_UNDEFINED
 
 
 class TestConnect:

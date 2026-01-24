@@ -93,7 +93,9 @@ class Device:
                     self, *args
                 )  # NB explicit self is needed here
             if inner_results:
-                self._further_acts += inner_results
+                if not isinstance(inner_results, (list, tuple)):
+                    inner_results = [inner_results]
+                self._further_acts.extend(list(inner_results))
             # Unset the current time, to catch any spurious calls to act() or update(),
             #  which are supposed to only be invoked from an input/action call.
             self._current_time = None
@@ -150,7 +152,9 @@ class Device:
         """Return a dict of the device's inputs."""
         return self._map_labelled_funcs("_label_input")
 
-    def add_output(self, name: str, start_value: ValueTypes = SIG_START_DEFAULT):
+    def add_output(
+        self, name_or_signal: str | Signal, start_value: ValueTypes = SIG_START_DEFAULT
+    ):
         """Create an output signal.
 
         Outputs are normally created in init.  They are automatically assigned to the
@@ -160,9 +164,21 @@ class Device:
         --------
         >>> self.add_output("out1", start_value=0)
         >>> out = <device>.outputs["out1"]
-        >>> <device>.out1.update(2.0, 2)
+        >>> <device>.out1.out(2.0, 2)
         """
-        output_signal = Signal(name=name, start_value=start_value)
+        match name_or_signal:
+            case str():
+                output_signal = Signal(name=name_or_signal, start_value=start_value)
+                name = name_or_signal
+            case Signal():
+                output_signal = name_or_signal
+                name = output_signal.name
+            case _:
+                msg = (
+                    f"Unexpected type {type(name_or_signal)} for 'name_or_signal':"
+                    f" {name_or_signal}."
+                )
+                raise ValueError(msg)
         self.outputs[name] = output_signal
         setattr(self, name, output_signal)
         return output_signal
@@ -213,7 +229,7 @@ class Device:
             event = Event(time, action, value, context)
             self._further_acts.append(event)
 
-    def update(
+    def out(
         self,
         output_name: str,
         value: ValueTypes | None = None,
@@ -223,6 +239,7 @@ class Device:
 
         There is no 'time' arg, as time is taken from the calling function
         (i.e. an action or input).
+        Any resulting new events are automatically returned from the caller input/action.
 
         Notes
         -----
@@ -231,7 +248,7 @@ class Device:
 
         Examples
         --------
-        >>> self.update('out1', new_value)
+        >>> self.out('out1', new_value)
         """
         # Check that we are called only from within an input/action routine.
         assert self._current_time is not None
@@ -239,7 +256,9 @@ class Device:
         if value is not None:
             value = EventValue(value)
         with self._run_with_hooks("update", time, value, context=output_name):
-            self.outputs[output_name].update(time, value)
+            new_events = self.outputs[output_name].update(time, value)
+        if new_events:
+            self._further_acts.extend(new_events)
 
     # Device hooks + tracing.
     # TODO: tracing should *not* be embedded in the Device code,
@@ -248,16 +267,24 @@ class Device:
     def hook(
         self, name: str, call: EventClient, context=None, call_after: bool = False
     ) -> SignalConnection:
-        """Hook an output, input or action of the device.
+        """Hook an operation of the device.
 
-        This installs a callback that runs when an output (signal) updates, either
-        *before* (default) or *after* (alternatively) an input/action func is invoked.
+                You can hook (by name) any input/output/action, or the 'act' and 'out' calls.
 
-        Notes:
-        * these operations cannot return new events
-        * the context passed to the callback is always of the form
-            {'call_context': <hooked_call_context>, 'hook_context': <context>}
-          In the case of an output, the 'call_context' part is always None.
+                This installs a callback that gets called when the given operation occurs, either
+                *before* (default) or *after* (alternatively) the operation takes place.
+
+                For inputs, when its 'update' is called.
+                For actions, when the action occurs.
+                For outputs, when the output changes (just like connecting to the signal).
+                For 'act'/'out', when the method is called (always within the code of an input
+                  or action operation).
+        =
+                Notes:
+                * these operations cannot return new events
+                * the context passed to the callback is always of the form
+                    {'call_context': <hooked_call_context>, 'hook_context': <context>}
+                  In the case of an output, the 'call_context' part is **always** None.
         """
         if name in self.outputs:
             # Outputs are signals, so hooks are installed by just connecting
@@ -274,7 +301,7 @@ class Device:
                 ["act", "update"] + list(self.inputs.keys()) + list(self.actions.keys())
             )
             if name not in all_names:
-                raise ValueError("Unrecognised hook name:")
+                raise ValueError(f"Unrecognised hook name: {name!r}")
             if name in ["act", "update"]:
                 # Special cases : since no callback, only put these in pre-hooks
                 call_after = False
