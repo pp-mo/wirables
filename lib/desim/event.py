@@ -67,6 +67,15 @@ class EventTime:
         return t1 < t2 or (t1 == t2 and p1 > p2)
 
     # TODO: implement addition with ordinary numbers  (not yet used/tested)
+    def __add__(self, other):
+        if isinstance(other, EventTime):
+            offset = other.time
+        else:
+            offset = other
+        return EventTime(time=self.time + offset, priority=0)
+
+    def __radd__(self, other):
+        return self.__add__(other)
 
 
 type ValueTypes = EventValue | int | float | str
@@ -141,3 +150,6 @@ class Event:
             args += (self.context,)
         results = self.callback(*args)
         return results
+
+
+PostEventTypes = Event | list[Event] | None

@@ -47,19 +47,27 @@ def run():
     dev.trace("update")
     sig_out.trace()
 
-    # A different way of providing a second input action : direct Event construction
-    # NB **also** calls via the signal interface, instead of the device input
-    events += [Event(1.3, sig.update, 2)]
-    while events:
-        events = sorted(events, key=lambda e: e.time)
-        event, events = events[0], events[1:]
-        print("\nNEXT:", event)
-        new_events = event.action()
-        if new_events:
-            events += new_events
-            print("resulting: ")
-            for event in new_events:
-                print("  - ", event)
+    from desim.sequencer import Sequencer
+
+    seq = Sequencer()
+    seq.add(events)
+    # seq.run()
+    seq.verbose = True
+    seq.interact()
+
+    # # A different way of providing a second input action : direct Event construction
+    # # NB **also** calls via the signal interface, instead of the device input
+    # events += [Event(1.3, sig.update, 2)]
+    # while events:
+    #     events = sorted(events, key=lambda e: e.time)
+    #     event, events = events[0], events[1:]
+    #     print("\nNEXT:", event)
+    #     new_events = event.action()
+    #     if new_events:
+    #         events += new_events
+    #         print("resulting: ")
+    #         for event in new_events:
+    #             print("  - ", event)
 
     print("Done")
 

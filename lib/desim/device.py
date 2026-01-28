@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 from functools import wraps
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from desim import SIG_UNDEFINED
 from desim.event import Event, EventClient, EventTime, EventValue, TimeTypes, ValueTypes
@@ -37,6 +37,7 @@ class Device:
         self.outputs: dict[str, Signal] = {}
         self._further_acts: list[Event] = []
         self._current_time = None  # set during input/action callbacks
+        self.state = self.RESET_STATE
         self.reset()
 
     def reset(self):
@@ -253,12 +254,33 @@ class Device:
         # Check that we are called only from within an input/action routine.
         assert self._current_time is not None
         time = self._current_time
-        if value is not None:
+        if value is None:
+            value = SIG_UNDEFINED
+        else:
             value = EventValue(value)
         with self._run_with_hooks("update", time, value, context=output_name):
             new_events = self.outputs[output_name].update(time, value)
         if new_events:
             self._further_acts.extend(new_events)
+
+    def check_validstate(
+        self, name: str, value_or_values: EventValue | list[EventValue]
+    ):
+        msg = None
+        if isinstance(value_or_values, Iterable):
+            if self.state not in value_or_values:
+                msg = (
+                    f"Unexpected state in {name}: {self.state!r} "
+                    f"not in {value_or_values!r}"
+                )
+        else:
+            if self.state != value_or_values:
+                msg = (
+                    f"Unexpected state in {name}: {self.state!r} "
+                    f"is not {value_or_values!r}"
+                )
+        if msg is not None:
+            raise ValueError(msg)
 
     # Device hooks + tracing.
     # TODO: tracing should *not* be embedded in the Device code,
@@ -378,10 +400,10 @@ class Device:
         device_name = trace_context["device_name"]
         component_type = trace_context["component_type"]
         component_name = trace_context["component_name"]
-        msg = (
-            f"TRACE {device_type}({device_name}).{component_type}({component_name}) : "
-        )
-        msg += f"@{time}"
+        time_str = f"{time.time:.1f}".rjust(6)
+        if time.priority != 0:
+            time_str += f"(priority={time.priority})"
+        msg = f"TRACE {time}: {device_type}({device_name}).{component_type}({component_name}) : "
         if component_type == "input":
             msg += f", value <-- {val}"
         elif component_type == "action":
@@ -399,29 +421,40 @@ class Device:
             msg += f" {call_context} <== {value}"
         print(msg)
 
-    def trace(self, name: str, after: bool = False) -> SignalConnection:
-        if name in self.inputs:
-            component_type = "input"
-        elif name in self.actions:
-            component_type = "action"
-        elif name in self.outputs:
-            component_type = "output"
-        elif name in ["act", "update"]:
-            component_type = name
+    def _all_trace_names(self) -> list[str]:
+        all_names = (
+            ["act", "update"] + list(self.inputs.keys()) + list(self.actions.keys())
+        )
+        return all_names
+
+    def trace(self, name: str, after: bool = False) -> SignalConnection | None:
+        if name == "*":
+            for a_name in self._all_trace_names():
+                self.trace(a_name)
+            result = None
         else:
-            msg = (
-                f"Cannot trace unknown device component: {name!r}, "
-                "not a known input, output or action."
-            )
-            raise ValueError(msg)
-        context = {
-            "device_type": self.__class__.__name__,
-            "device_name": self.name,
-            "component_type": component_type,
-            "component_name": name,
-        }
-        hook = self.hook(name, self._trace_callback, context, call_after=after)
-        return hook
+            if name in self.inputs:
+                component_type = "input"
+            elif name in self.actions:
+                component_type = "action"
+            elif name in self.outputs:
+                component_type = "output"
+            elif name in ["act", "update"]:
+                component_type = name
+            else:
+                msg = (
+                    f"Cannot trace unknown device component: {name!r}, "
+                    "not a known input, output or action."
+                )
+                raise ValueError(msg)
+            context = {
+                "device_type": self.__class__.__name__,
+                "device_name": self.name,
+                "component_type": component_type,
+                "component_name": name,
+            }
+            result = self.hook(name, self._trace_callback, context, call_after=after)
+        return result
 
     def untrace(self, name_or_hook: str | SignalConnection):
         match name_or_hook:
@@ -432,13 +465,22 @@ class Device:
             case str():
                 # Given name : we must identify all matching hooks + remove each one.
                 name: str = name_or_hook
-                for hookset in (self._prehooks, self._posthooks, self._output_hooks):
-                    hooklist = hookset.get(name, None)
-                    if hooklist is not None:
-                        tracehooks = [
-                            hook
-                            for hook in hooklist
-                            if hook.call == self._trace_callback
-                        ]
-                        for tracehook in tracehooks:
-                            self.unhook(tracehook)
+                if name == "*":
+                    names = self._all_trace_names()
+                else:
+                    names = [name]
+                for name in names:
+                    for hookset in (
+                        self._prehooks,
+                        self._posthooks,
+                        self._output_hooks,
+                    ):
+                        hooklist = hookset.get(name, None)
+                        if hooklist is not None:
+                            tracehooks = [
+                                hook
+                                for hook in hooklist
+                                if hook.call == self._trace_callback
+                            ]
+                            for tracehook in tracehooks:
+                                self.unhook(tracehook)

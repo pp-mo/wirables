@@ -74,6 +74,24 @@ class TestStrRepr:
         assert result == expected
 
 
+class TestAdd:
+    @pytest.mark.parametrize("val", [1, 1.23, EventTime(2, 5)])
+    @pytest.mark.parametrize("order", ["forward", "reverse"])
+    def test_add_ev_value(self, val, order):
+        time = EventTime(10.0, priority=17)
+        if order == "forward":
+            time2 = time + val
+        else:
+            time2 = val + time
+        if isinstance(val, EventTime):
+            vt = val.time
+        else:
+            vt = val
+        assert isinstance(time2, EventTime)
+        assert time2.time == time.time + vt
+        assert time2.priority == 0
+
+
 class TestSortorder:
     def test_evcompare(self):
         t1 = EventTime(1)
