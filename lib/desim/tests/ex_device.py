@@ -4,26 +4,28 @@ from desim.device import Device
 
 
 class TrialDevice(Device):
-    def __init__(self, name: str, delay: float = 1.5):
-        super().__init__(name)
-        self.delay = delay
+    STATES = ["idle", "changing"]
+    TIMINGS = {"t_delay": 1.5}
+
+    def __init__(self, name: str, **kwargs):
+        super().__init__(name, **kwargs)
         self.out1 = self.add_output("out1")
 
     @Device.input
     def in1(self, time, value):
         if self.state == "idle":
             self.out("out1", SIG_UNDEFINED)
-        self.state = "changing"
-        self._time_change_complete = time.time + self.delay
+        self.xto("idle", "changing")
+        self._time_change_complete = time.time + self.t_delay
         self._latest_value = value
-        self.act(self._time_change_complete, "new_output")
+        self.act("newdata", self._time_change_complete)
 
     @Device.action
-    def new_output(self, time):
-        assert self.state == "changing"
+    def act_newdata(self, time):
+        self.xto("changing")
         if time.time >= self._time_change_complete:
             self.out("out1", self._latest_value)
-            self.state = "idle"
+            self.xto("changing", "idle")
 
 
 def run():
@@ -39,21 +41,26 @@ def run():
     events = []
     events += [Event(1.0, dev.in1, 1)]
 
-    sig.trace()
-    dev.trace("in1")
-    dev.trace("out1")
-    dev.trace("new_output")
-    dev.trace("act")
-    dev.trace("update")
-    sig_out.trace()
+    # sig.trace()
+    dev.trace("*")
+    # dev.trace("act")
+    # dev.trace("act_value_out")
+    # dev.trace("out")
+    # dev.trace("xto")
+    # dev.trace("in1")
+    # dev.trace("out1")
+    # dev.trace("act_newdata")
+    # dev.trace("act")
+    # dev.trace("update")
+    # sig_out.trace()
 
     from desim.sequencer import Sequencer
 
     seq = Sequencer()
     seq.add(events)
-    # seq.run()
     seq.verbose = True
-    seq.interact()
+    seq.run()
+    # seq.interact()
 
     # # A different way of providing a second input action : direct Event construction
     # # NB **also** calls via the signal interface, instead of the device input

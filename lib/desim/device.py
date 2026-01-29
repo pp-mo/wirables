@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from functools import wraps
-from typing import Any, Callable, Iterable
+import inspect
+from typing import Any, Callable
 
 from desim import SIG_UNDEFINED
 from desim.event import Event, EventClient, EventTime, EventValue, TimeTypes, ValueTypes
@@ -27,25 +28,27 @@ class Device:
         or returning a list of events.
     """
 
-    RESET_STATE = "idle"
+    STATES: list[str] = ["idle"]
+    TIMINGS: dict[str, float] = {}
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, *args, **kwargs):
         self.name = name
         self._prehooks: dict[str, list[SignalConnection]] = {}
         self._posthooks: dict[str, list[SignalConnection]] = {}
         self._output_hooks: dict[str, list[SignalConnection]] = {}
         self.outputs: dict[str, Signal] = {}
         self._further_acts: list[Event] = []
-        self._current_time = None  # set during input/action callbacks
-        self.state = self.RESET_STATE
-        self.reset()
-
-    def reset(self):
-        """Reset the device to the initial state.
-
-        A conventional usage.
-        """
-        self.state = self.RESET_STATE
+        self._current_time: EventTime | None = None  # set during input/action callbacks
+        self.timings = self.TIMINGS.copy()
+        for name, time in self.timings.items():
+            if not name.startswith("t_"):
+                raise ValueError(f"Timing name {name!r} does not begin 't_'.")
+            time_arg = kwargs.pop(name, None)
+            if time_arg is not None:
+                time = float(time_arg)
+                self.timings[name] = time
+            setattr(self, name, time)
+        self.state = self.STATES[0]
 
     # Device inputs, actions and outputs.
     # All are subclass-specific.
@@ -75,7 +78,7 @@ class Device:
             # Set a 'latest time' record: This enables update() to have a default time,
             #  and means we can test if update/act are called from an input/action.
             assert self._current_time is None
-            self._current_time = time
+            self._current_time = EventTime(time)
             match value:
                 case None:
                     value = None
@@ -190,8 +193,8 @@ class Device:
 
     def act(
         self,
+        action_or_name: str | EventClient,
         time: TimeTypes,
-        action_name: str,
         value: ValueTypes | None = None,
         context=None,
     ):
@@ -207,7 +210,7 @@ class Device:
 
         Examples
         --------
-        >>> self.act(t + 0.5, 'next')
+        >>> self.act('next',t + 0.5)
 
         Notes
         -----
@@ -220,13 +223,31 @@ class Device:
           checked + will error if not.
         """
         # Check that we are called only from within an input/action routine.
-        assert self._current_time is not None
+        if self._current_time is None:
+            raise ValueError(f"{self.name}.act not called from input/action/act/out.")
         time = EventTime(time)
         if value is not None:
             value = EventValue(value)
-        action = self.actions.get(action_name)
+        action: EventClient | None = None
+        match action_or_name:
+            case func if callable(func):
+                action = action_or_name
+            case str():
+                for prefix in ("act_", "act", ""):
+                    name = prefix + action_or_name
+                    action = self.actions.get(name, None)
+                    if action is not None:
+                        break
+
+        if action not in self.actions.values():
+            msg = (
+                f"Argument {action_or_name} is not an action of this device, "
+                f"{self.name}."
+            )
+            raise ValueError(msg)
+
         assert callable(action) and hasattr(action, "_label_action")
-        with self._run_with_hooks("act", time, value, context=action_name):
+        with self._run_with_hooks("act", time, value, context=action.__name__):
             event = Event(time, action, value, context)
             self._further_acts.append(event)
 
@@ -252,35 +273,67 @@ class Device:
         >>> self.out('out1', new_value)
         """
         # Check that we are called only from within an input/action routine.
-        assert self._current_time is not None
+        if self._current_time is None:
+            raise ValueError(f"{self.name}.out not called from input/action/act/out.")
         time = self._current_time
         if value is None:
             value = SIG_UNDEFINED
         else:
             value = EventValue(value)
-        with self._run_with_hooks("update", time, value, context=output_name):
+
+        with self._run_with_hooks("out", time, value, context=output_name):
             new_events = self.outputs[output_name].update(time, value)
+
         if new_events:
             self._further_acts.extend(new_events)
 
-    def check_validstate(
-        self, name: str, value_or_values: EventValue | list[EventValue]
-    ):
-        msg = None
-        if isinstance(value_or_values, Iterable):
-            if self.state not in value_or_values:
-                msg = (
-                    f"Unexpected state in {name}: {self.state!r} "
-                    f"not in {value_or_values!r}"
-                )
+    def xto(self, current_state_s: str | list[str], new_state: str | None = None):
+        if self._current_time is None:
+            raise ValueError(f"{self.name}.xto not called from input/action/act/out.")
+
+        if isinstance(current_state_s, str):
+            current_states = [current_state_s]
         else:
-            if self.state != value_or_values:
+            current_states = current_state_s
+
+        funcname = "<?unknown?"
+        callnames = self.all_eventcall_names()
+        for stk in inspect.stack():
+            thisname = stk.function
+            obj = stk.frame.f_locals.get("self", None)
+            if obj is self and thisname in callnames:
+                funcname = thisname
+                break
+        caller_name = f"{self.name}.{funcname}"
+
+        msg = ""
+        given_states = current_states
+        if new_state is not None:
+            given_states += [new_state]
+        for state in given_states:
+            if state not in self.STATES:
                 msg = (
-                    f"Unexpected state in {name}: {self.state!r} "
-                    f"is not {value_or_values!r}"
+                    f"State {state!r} in args of {self.name}.xto is not a valid state. "
+                    f"Called from {caller_name} method, "
+                    f"Valid states are {self.STATES!r}."
                 )
-        if msg is not None:
+                break
+        if self.state not in current_states:
+            msg = (
+                f"Current state {self.state} in {self.name}.xto, "
+                f"called from {caller_name} method, "
+                f"is not one of the expected states: {self.STATES!r}."
+            )
+
+        if msg:
             raise ValueError(msg)
+
+        time, value = self._current_time, EventValue(0)
+        with self._run_with_hooks(
+            "xto", time, value, context=(caller_name, self.state, new_state)
+        ):
+            if new_state is not None:
+                self.state = new_state
 
     # Device hooks + tracing.
     # TODO: tracing should *not* be embedded in the Device code,
@@ -319,12 +372,10 @@ class Device:
             # Inputs and Actions are EventClient-type methods : hooks are created by
             #  just inserting connections into the pre- or post-hook lists.
             # The "act" and "update" methods are also 'hookable'.
-            all_names = (
-                ["act", "update"] + list(self.inputs.keys()) + list(self.actions.keys())
-            )
+            all_names = self.all_eventcall_names()
             if name not in all_names:
                 raise ValueError(f"Unrecognised hook name: {name!r}")
-            if name in ["act", "update"]:
+            if name in ["act", "update", "out"]:
                 # Special cases : since no callback, only put these in pre-hooks
                 call_after = False
             hookset = self._posthooks if call_after else self._prehooks
@@ -417,19 +468,24 @@ class Device:
             # msg = desim.signal.TRACE_HANDLER_CLIENT(time, value, signal=call_context)
         elif component_type == "act":
             msg += f" ==> {call_context!r}"
-        elif component_type == "update":
+        elif component_type == "out":
             msg += f" {call_context} <== {value}"
+        elif component_type == "xto":
+            callername, oldstate, newstate = call_context
+            msg += f" (in {callername}) state {oldstate!r} -> {newstate!r}."
+        if component_type not in ("input", "action"):
+            msg = "  " + msg
         print(msg)
 
-    def _all_trace_names(self) -> list[str]:
+    def all_eventcall_names(self) -> list[str]:
         all_names = (
-            ["act", "update"] + list(self.inputs.keys()) + list(self.actions.keys())
+            ["act", "out", "xto"] + list(self.inputs.keys()) + list(self.actions.keys())
         )
         return all_names
 
     def trace(self, name: str, after: bool = False) -> SignalConnection | None:
         if name == "*":
-            for a_name in self._all_trace_names():
+            for a_name in self.all_eventcall_names():
                 self.trace(a_name)
             result = None
         else:
@@ -439,7 +495,7 @@ class Device:
                 component_type = "action"
             elif name in self.outputs:
                 component_type = "output"
-            elif name in ["act", "update"]:
+            elif name in ["act", "out", "xto"]:
                 component_type = name
             else:
                 msg = (
@@ -466,7 +522,7 @@ class Device:
                 # Given name : we must identify all matching hooks + remove each one.
                 name: str = name_or_hook
                 if name == "*":
-                    names = self._all_trace_names()
+                    names = self.all_eventcall_names()
                 else:
                     names = [name]
                 for name in names:

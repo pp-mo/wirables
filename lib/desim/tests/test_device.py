@@ -131,7 +131,7 @@ class TestActions:
         # It's an error to pass a value when none was expected
         msg = "\.act\(\) takes 2 positional arguments but 3 were given"
         with pytest.raises(TypeError, match=msg):
-            dev.act(1, 2)
+            dev.act(2, 1)
 
 
 class Test_add_output:
