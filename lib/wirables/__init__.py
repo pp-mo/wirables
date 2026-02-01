@@ -1,99 +1,43 @@
 """
-Discrete Event Simulation.
+Discrete Event Simulation
 
-Proposed:
-    * a device output is a signal
-    * a device input is an EventClient -- but see below...
-    * an Event is a (time, value, call, context)
-        -- but the time can have (optional) priority, in addition to a float value
-    * an EventClient is Callable[[EventTime, EventValue, context], None]
+Provides Devices, with inputs, outputs and internal state, and which communicate via
+Signals.
 
-To trigger stuff, either Signal.update() or Device.<input>().
-A Signal.update()
-  performs connection calls, which may include Device.<input> calls,
-  so it *could* return new events.
+A Signal has an EventValue state, and communicates changes to this at given EventTime-s.
 
-A Device.<input>() will likewise return List[Event]
+A device's "input"s can be connected to signals, and their "output"s *are* Signals.
+A device can also have 'actions', which are internal changes occurring at a scheduled
+EventTime.
 
-??queries??
-    - an input call input(time, value) definitely does *not* have context.
-    - likewise, an action(time) doesn't need value OR context.
+An Event specifies a particular operation (a function call) at a particular EventTime,
+also with optional associated EventValue and user 'context' values.
 
+A Sequencer maintains a list of Events and executes them in sequence.
+All Event calls can return additional (future) events, to be added to the sequencer.
+A sequencer can run: for ever; for a number of steps; or to a certain time.
+It can also be controlled interactively with keyboard input.
 
-Basic classes:
+In practice, events are calls to: a signal "update", a device "input" or a device "action"
+method.
+Signal update calls only ever call their connections (e.g. device inputs or trace
+routines), but device event-triggered calls ("input"s and "action"s) may also call one of
+three standard methods:
+  * 'out' changes a device output (which is a Signal.update call)
+  * 'xto' changes the device "state"
+  * 'act' schedules a future "action" callback on the (same) device.
 
-A Device is an object with :
-    its own name (instance)
-    a parent scheduler
-    various internal state variables (private + arbitrary)
-    self.inputs :: Dict[str, callable]
-        are named instance methods with the general signature (time, value)
-        are decorated with @Device.input for common behaviour
-        can be connected, for a specific instance, to an input Signal
-            with Device.connect_input(name, signal)
-                [[==convenience for signal.connect(Device.input_name)]]
-    self.outputs :: Dict[str, Signal]
-        are Signals
-        are created in the init with Device.define_output(name, start_value=None)
-        are accessible as named properties of the object.
-    self.actions :: Dict[str, callable]
-        are named event methods encoding a device state transition
-        have a generic signature (time)
-        are decorated with @Device.action for common behaviour
-        can be scheduled with Device.act(time, action_name)
-            [[==convenience for device.scheduler.add(Event(time, device.action)]]
-
-Device.connect_input(name, signal)
-Device.act(time, action_name)
-
-Device inputs, outputs and action calls, can all be "hooked" by adding a hook to a named
-component with Device.hook(component_name, hook_client, **kwargs)  [[and Device.unhook]]
-The hook_client generic signature is (time, **kwargs) for actions,
-    and (time, value, **kwargs) for inputs/outputs
-
-Again, tracing can be defined as a "standard operation", using hooking..
-
-Device.trace(name)  --> Device._trace_input/output/action(name)
-(and Device.untrace)
-def Device.trace(name):
-    hooks = self.__dict__.setdefault("_hooks", [])
-    if name in self.inputs
-        def _inner_call(time, value):
-            print(f"time={time} INPUT UPDATE {self.name}{name} = {state}")
-    if name in self.outputs:
-        def _inner_call(time, signal):
-            print(f"time={time} OUTPUT UPDATE {self.name}{name} : {signal.previous_state} -> {signal.state}")
-        getattr(self,
-    elif name in self.actions:
-        def _inner_call(time, signal):
-            print(f"time={time} ACTION {self.name}{name}")
-    hooks.append(_inner_call)
-
-An Event specifies a Call to happen at a given time + priority.
-Event(time: float | (float, int), call: callable, **kwargs)
-    .call(time) -> List[Event] | None
-
- # ??? when called, of 'call' returns further events **these are scheduled**
- # ??? not really necessary ???
-    - most events are device actions, which call Device.act
-
-A Scheduler contains a list of Events, which are executed in (time, priority) order.
-    Each (the call can schedule further events)
-Scheduler(events)
-  .add_event(Event | (time: float | (float, int), call: callable, **kwargs)))
-  .run(start=0, end=-1)
 """
 
-# Import all the important things in one place.
+# Import the major commonly used definitions into the root module.
 from .signal import Signal, SIG_ZERO, SIG_START_DEFAULT, SIG_UNDEFINED
-from .event import Event, EventClient, EventTime, EventValue, TimeTypes, ValueTypes
+from .event import Event, EventTime, EventValue
 from .device import Device
 from .sequencer import Sequencer
 
 __all__ = [
     "Device",
     "Event",
-    "EventClient",
     "EventTime",
     "EventValue",
     "SIG_START_DEFAULT",
@@ -101,6 +45,4 @@ __all__ = [
     "SIG_ZERO",
     "Sequencer",
     "Signal",
-    "TimeTypes",
-    "ValueTypes",
 ]

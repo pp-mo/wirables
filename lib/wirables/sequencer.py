@@ -1,7 +1,5 @@
-from distlib.compat import raw_input
-
+from wirables import Event, EventTime
 from wirables.signal import TimeTypes
-from wirables.event import Event, EventTime
 
 
 __all__ = ["Sequencer"]
@@ -94,10 +92,8 @@ class Sequencer:
 
     def interact(self):
         while True:
-            print(
-                "\n n=steps / t.t=for / -t.t=until / *=all / ?\n: ",
-            )
-            ask = raw_input().lower().strip()
+            prompt = "\n n=steps / t.t=for / -t.t=until / *=all / ?\n: "
+            ask = input(prompt).lower().strip()
             if ask == "":
                 # Default is single step
                 ask = "1"

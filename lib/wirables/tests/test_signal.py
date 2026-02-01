@@ -1,7 +1,7 @@
 import pytest
 
 from wirables import signal
-from wirables.signal import Signal, SIG_START_DEFAULT, SIG_UNDEFINED
+from wirables import Signal, SIG_START_DEFAULT, SIG_UNDEFINED
 
 
 @pytest.fixture(autouse=True)
@@ -39,7 +39,7 @@ class TestUpdate:
         sig.update(0, 77)
         assert sig.value == 77
         sig.update(0)
-        assert sig.value == signal.SIG_UNDEFINED
+        assert sig.value == SIG_UNDEFINED
 
 
 class TestConnect:

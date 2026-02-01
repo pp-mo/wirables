@@ -1,6 +1,6 @@
 import pytest
 
-from wirables.event import EventValue
+from wirables import EventValue
 
 
 class TestCreate:

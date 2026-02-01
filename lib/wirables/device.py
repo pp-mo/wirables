@@ -8,13 +8,10 @@ from wirables import (
     SIG_START_DEFAULT,
     Signal,
     Event,
-    EventClient,
     EventTime,
     EventValue,
-    TimeTypes,
-    ValueTypes,
 )
-from wirables.signal import SignalConnection
+from wirables.signal import EventClient, SignalConnection, TimeTypes, ValueTypes
 
 
 InputAndActionClassCallsType = Callable[
